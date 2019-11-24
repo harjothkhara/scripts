@@ -1,14 +1,14 @@
-'use strict'
+"use strict";
 
 /**
  * Dependencies
  */
 
-const child_process = require('child_process')
-const prompt = require('prompt')
-const colors = require('colors')
-const meow = require('meow')
-const showHelp = require('../helpers/showHelp')
+const child_process = require("child_process");
+const prompt = require("prompt");
+const colors = require("colors");
+const meow = require("meow");
+const showHelp = require("../helpers/showHelp");
 
 /**
  * Constants
@@ -16,52 +16,62 @@ const showHelp = require('../helpers/showHelp')
 
 const config = {
   cwd: process.cwd(),
-  stdio: [null, 'inherit', 'inherit']
-}
+  stdio: [null, "inherit", "inherit"]
+};
 
 /**
  * Parse args
  */
 
-const cli = meow(`
+const cli = meow(
+  `
   Usage
     $ cast gitcommit
 
   Options
     --message, -m <message>  Commit message
-`, {
-  description: 'Create a git commit.',
-  flags: {
-    message: {
-      type: 'string',
-      alias: 'm'
+`,
+  {
+    description: "Create a git commit.",
+    flags: {
+      message: {
+        type: "string",
+        alias: "gc"
+      }
     }
   }
-})
+);
 
 /**
  * Define script
  */
 
 function gitcommit() {
-  showHelp(cli)
+  showHelp(cli);
 
-  const result = child_process.spawnSync('git', ['add', '-A'], config)
+  const result = child_process.spawnSync("git", ["add", "-A"], config);
 
   if (result.status === 0) {
-    const message = cli.flags.message
+    const message = cli.flags.message;
 
     if (cli.flags.message) {
-      child_process.spawnSync('git', ['commit', '-m', message], config)
+      child_process.spawnSync("git", ["commit", "-m", message], config);
     } else {
-      prompt.message = ''
-      prompt.get({
-        name: 'message',
-        description: colors.white.bold('Message'),
-        required: true
-      }, (err, result) => {
-        child_process.spawnSync('git', ['commit', '-m', result.message], config)
-      })
+      prompt.message = "";
+      prompt.get(
+        {
+          name: "message",
+          description: colors.white.bold("Message"),
+          required: true
+        },
+        (err, result) => {
+          child_process.spawnSync(
+            "git",
+            ["commit", "-m", result.message],
+            config
+          );
+        }
+      );
     }
   }
 }
@@ -70,4 +80,4 @@ function gitcommit() {
  * Export script
  */
 
-module.exports = gitcommit
+module.exports = gitcommit;
