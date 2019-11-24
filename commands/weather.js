@@ -19,7 +19,7 @@ const figlet = require("figlet");
 
 const CONFIG_PATH = path.join(process.env.HOME, ".weather.json");
 const CONFIG_DEFAULT = {
-  location: "Union City, CA",
+  location: "Houston, TX",
   scale: "fahrenheit"
 };
 
