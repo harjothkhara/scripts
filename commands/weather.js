@@ -7,11 +7,13 @@
 const fs = require("fs");
 const path = require("path");
 const meow = require("meow");
-const showHelp = require("../helpers/showHelp");
 const weather_js2 = require("weather-js2");
 const { table } = require("table");
 const chalk = require("chalk");
 const figlet = require("figlet");
+const showHelp = require("../helpers/showHelp");
+const isMainCommand = require("../helpers/isMainCommand");
+const Storage = require("../helpers/Storage");
 
 /**
  * Constants
@@ -27,29 +29,34 @@ const CONFIG_DEFAULT = {
  * Parse args
  */
 
-const cli = meow(`
+const cli = meow(
+  `
   Usage
     $ cast weather [LOCATION]
 
   Options
     --celsius     Degrees in Celsius.
     --fahrenheit  Degrees in Fahrenheit (Default).
-`);
+`,
+  {
+    flags: {
+      celsius: {
+        type: "boolean",
+        alias: "c"
+      },
+      fahrenheit: {
+        type: "boolean",
+        alias: "f"
+      }
+    }
+  }
+);
 
 /**
  * Define helpers
  */
 
-function figlet_text(text) {
-  return new Promise((resolve, reject) => {
-    figlet.text(text, (err, data) => {
-      if (err) reject(err);
-      resolve(data);
-    });
-  });
-}
-
-function weather_js2_async(location, scale) {
+function fetchWeather(location, scale) {
   const degreeType = scale == "fahrenheit" ? "F" : "C";
 
   return new Promise((resolve, reject) => {
@@ -63,7 +70,7 @@ function weather_js2_async(location, scale) {
   });
 }
 
-function generate_icon(code) {
+function generateIcon(code) {
   let icon;
 
   if (
@@ -122,86 +129,94 @@ function generate_icon(code) {
   return icon;
 }
 
-function readConfig() {
-  if (fs.existsSync(CONFIG_PATH)) {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH));
-  } else {
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(CONFIG_DEFAULT));
-    return CONFIG_DEFAULT;
-  }
-}
-
-function writeConfig(key, value) {
-  let options = JSON.parse(fs.readFileSync(CONFIG_PATH));
-  options[key] = value;
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(options, null, 2));
-}
-
 function renderScale(scale) {
   return scale == "fahrenheit" ? "°F" : "°C";
+}
+
+function buildOutput(res, scale) {
+  return `
+Location: ${res.location.name}
+
+${generateIcon(res.current.skycode)}  ${res.current.skytext}
+   Today ${res.current.temperature} ${renderScale(scale)}
+   ${res.current.winddisplay}
+
+`;
+  // console.log(`\nLocation: ${res.location.name}\n`);
+  // console.log(`${generateIcon(res.current.skycode)}  ${res.current.skytext}`);
+  // console.log(`   Today ${res.current.temperature} ${renderScale(scale)}`);
+  // console.log(`   ${res.current.winddisplay}`);
+  // console.log('');
+}
+
+function setScale(options, cli, config) {
+  if (options.celsius) return "celsius";
+  if (options.fahrenheit) return "fahrenheit";
+  if (cli.flags.celsius === true) return "celsius";
+  if (cli.flags.fahrenheit === true) return "fahrenheit";
+  return config.scale;
 }
 
 /**
  * Define script
  */
 
-async function weather() {
+async function weather(location = null, options = {}) {
   showHelp(cli);
 
-  let options = readConfig();
+  const config = new Storage(CONFIG_PATH);
 
-  if (cli.input.length > 1) {
-    options.location = cli.input.slice(1, cli.input.length).join(" ");
-    writeConfig("location", options.location);
-  }
+  // Cache location.
+  location =
+    location ||
+    cli.input.slice(1, cli.input.length).join(" ") ||
+    config.location;
+  config.location = location;
 
-  if (cli.flags.celsius || cli.flags.fahrenheit) {
-    options.scale = cli.flags.fahrenheit ? "fahrenheit" : "celsius";
-    writeConfig("scale", options.scale);
-  }
+  // Cache temperature scale.
+  const scale = setScale(options, cli, config);
+  config.scale = scale;
 
   try {
-    const result = await weather_js2_async(options.location, options.scale);
+    const result = await fetchWeather(location, scale);
 
     const res = result.reduce((acc, curr) => {
-      if (curr.location.name == options.location) {
+      if (curr.location.name == location) {
         return location;
       } else {
         return acc;
       }
     });
 
-    console.log(`\nLocation: ${res.location.name}\n`);
-    console.log(
-      `${generate_icon(res.current.skycode)}  ${res.current.skytext}`
-    );
-    console.log(
-      `   Today ${res.current.temperature} ${renderScale(options.scale)}`
-    );
-    console.log(`   ${res.current.winddisplay}`);
-    console.log("");
-
     // Filter out historic forecasts
     res.forecast = res.forecast.filter(
       daily_forecast => daily_forecast.date >= res.current.date
     );
 
+    // Format daily forecasts.
     const res_array = res.forecast.map(daily_forecast => {
-      let icon = generate_icon(daily_forecast.skycodeday);
+      let icon = generateIcon(daily_forecast.skycodeday);
       return `${icon}  ${daily_forecast.skytextday}\n   ${
         daily_forecast.shortday
       } ${chalk.green.bold(daily_forecast.high)} - ${chalk.green.bold(
         daily_forecast.low
-      )} ${renderScale(options.scale)}\n   Precipitation ${
-        daily_forecast.precip
-      }%`;
+      )} ${renderScale(scale)}\n   Precipitation ${daily_forecast.precip}%`;
     });
 
-    console.log(table([res_array]));
-    console.log("");
+    // Build weather output.
+    let output = "";
+    output += buildOutput(res, scale);
+    output += table([res_array]);
+
+    if (isMainCommand(module)) {
+      console.log(output);
+      console.log("");
+    } else {
+      return output;
+    }
   } catch (err) {
     console.error(err);
-    console.error(chalk.red.bold(`Coudn't find location: ${options.location}`));
+    console.error(chalk.red.bold(`Coudn't find location: ${location}`));
     process.exit(1);
   }
 }

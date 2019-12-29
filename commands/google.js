@@ -4,12 +4,56 @@
  * Dependencies
  */
 
+const path = require('path');
 const meow = require('meow');
-const scrape = require('./scrape');
-const cheerio = require('cheerio');
 const chalk = require('chalk');
+const cheerio = require('cheerio');
+const Sequelize = require('sequelize');
+const scrape = require('./scrape');
 const showHelp = require('../helpers/showHelp');
 const launchBrowser = require('../helpers/launchBrowser');
+const Database = require('../helpers/Database');
+
+/**
+ * Constants
+ */
+
+const DB_PATH = path.join(process.env.HOME, '.google.sqlite3');
+const QUERIES = {
+  insertResult: () => `
+    INSERT OR IGNORE INTO results (query, href, title, description) VALUES ($1, $2, $3, $4);
+  `,
+  createTablesQueries: () => `
+    CREATE TABLE IF NOT EXISTS results (
+      id integer PRIMARY KEY,
+      query text,
+      href text UNIQUE,
+      title text,
+      description text,
+      created_at timestamp DEFAULT CURRENT_TIMESTAMP
+    );
+  `
+};
+
+/**
+ * Define helpers
+ */
+
+async function saveResults(db, query, results) {
+  try {
+    for (let i = 0; i < results.length; i++) {
+      await db.exec('insertResult', null, {
+        bind: [
+          query,
+          results[i].href,
+          results[i].title,
+          (results[i].description || ''),
+      ]});
+    }
+  } catch (e) {
+    console.error(e);
+  }
+}
 
 /**
  * Parse args
@@ -57,10 +101,10 @@ function formatValidResults(scrapedResults) {
 }
 
 function printResults(results) {
+  console.log('')
   results.forEach(result => {
-    console.log(chalk.green.bold(result.title))
-    console.log(chalk.yellow.bold(result.href))
-    console.log(result.description)
+    console.log('  ' + chalk.green.bold(result.title))
+    console.log('  ' + chalk.yellow.bold(result.href))
     console.log('')
   })
 }
@@ -69,14 +113,19 @@ function printResults(results) {
  * Define script
  */
 
-async function google(query=null, limit=null) {
+async function google(query = null, options={}) {
   showHelp(cli, [(!query && cli.input.length < 2)]);
 
-  query = query ? query : cli.input.slice(1).join(' ');
-  limit = limit || cli.flags.count || 10;
+  query = query || cli.input.slice(1).join(' ');
+  const limit = options.limit || cli.flags.count || 10;
+
+  const db = new Database(DB_PATH, QUERIES);
+  await db.exec('createTablesQueries');
 
   const browser = await launchBrowser({
-    headless: true,
+    headless: false,
+    delay: 400,
+    timeout: 0,
     defaultViewport: {
       width: 1024,
       height: 800
@@ -84,9 +133,10 @@ async function google(query=null, limit=null) {
   });
 
   const scrapeResults = async (query='', start=0) => await scrape(
-    `https://www.google.com/search?q=${query}&start=${start}`,
-    'div.g',
-    browser
+    `https://www.google.com/search?q=${query}&start=${start}`, {
+      selector: 'div.g',
+      browser
+    }
   )
 
   let results = [];
@@ -113,9 +163,10 @@ async function google(query=null, limit=null) {
         console.log(JSON.stringify(results))
       }
     }
+
+    await saveResults(db, query, results);
   } catch (err) {
-    console.error(err);
-    return err;
+    console.error(err); return err;
   } finally {
     browser.close();
     return results;
